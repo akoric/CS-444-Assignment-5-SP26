@@ -140,7 +140,7 @@ MultiHeadSelfAttn:
     - Refer to Attention is all you need Section 3.2.2
 '''
 
-class SelfAttention(nn.Module):
+class MultiHeadSelfAttn(nn.Module):
     def __init__(self, hidden_dim, num_heads, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         ## TODO: Implement MultiHeadSelfAttn, you must use the SelfAttention modules you implemented above
@@ -188,39 +188,86 @@ class DiTBlock(nn.Module):
     def __init__(self, hidden_dim, num_heads, ff_dim, time_emb_dim, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         ## TODO: Implement DiTBlock
+        self.hidden_dim = hidden_dim
+
         ## Modules needed: 2x LN, MLP (can be implemented using nn.Sequential), FeedForward, MultiHeadSelfAttention
         ## You must zero initialize the linear layers in the MLP
+        def zero_init(layer):
+            nn.init.zeros_(layer.weight)
+            nn.init.zeros_(layer.bias)
+            return layer
+
+
+        self.time_emb = nn.Sequential (
+            nn.Linear(time_emb_dim, time_emb_dim // 4),
+            nn.SiLU(),
+            zero_init(nn.Linear(time_emb_dim // 4, hidden_dim * 6)) #output shape: (batch dimension, hidden dimension * 6)
+        )
+
+        self.mhsa = MultiHeadSelfAttn(hidden_dim, num_heads)
+
+        # normalize over the last dimension of size hidden_dim (each token independently)
+        self.norm1 = nn.LayerNorm(self.hidden_dim, elementwise_affine=False)
+        self.norm2 = nn.LayerNorm(self.hidden_dim, elementwise_affine=False)
+
+        # FFN: each token processed independently
+        # (B, T, hidden_dim) -> (B, T, ff_dim) -> ReLU -> (B, T, hidden_dim)
+        # the ff_dim expansion gives the FFN more capacity to learn complex transformations
+        self.ffn = FeedForward(hidden_dim, ff_dim)
 
 
     ## X is the input patches, cond is the time embedding
     def forward(self, x, cond):
+        # Input: x = image tokens of shape (batch size, number of tokens, hidden dimension)
+        #     cond = time embedding of shape (batch size, time embedding dimension)
 
         ## TODO: Implement DiTBlock, x is the input patches, cond is the time embedding
 
         ## Step 1: Get the parameters from the condition
+        prams = self.time_emb(cond)
+        # split into 6 equal chunks along last dim
+        alpha_1, beta_1, gamma_1, alpha_2, beta_2, gamma_2 = prams.chunk(6, dim=-1)
+
+        # from hint: make sure dim are suitable for multiplication/addition with the image tokens input
+        alpha_1 = alpha_1.unsqueeze(1) # (B, 1, hidden_dim)
+        beta_1 = beta_1.unsqueeze(1)
+        gamma_1 = gamma_1.unsqueeze(1)
+
+        alpha_2 = alpha_2.unsqueeze(1) # (B, 1, hidden_dim)
+        beta_2 = beta_2.unsqueeze(1)
+        gamma_2 = gamma_2.unsqueeze(1)
 
         ## Step 2: Apply layer normalization
 
         ## Step 3: Apply scale and shift
+        # x: (B, T, hidden_dim)
+        attn_in_1 = (gamma_1 +1) * self.norm1(x) + beta_1
 
         ## Step 4: Apply multi-head self-attention
+        attn_out_1 = self.mhsa(attn_in_1)
 
         ## Step 5: Scale output
+        attn_out_1 = alpha_1 * attn_out_1
 
         ## Step 6: Add the original input
+        x = x + attn_out_1
 
         ## Step 7: Apply layer normalization
 
         ## Step 8: Apply scale and shift
+        attn_in_2 = (gamma_2 +1) * self.norm2(x) + beta_2
 
         ## Step 9: Apply feedforward
+        attn_out_2 = self.ffn(attn_in_2)
 
         ## Step 10: Scale output
+        attn_out_2 = alpha_2 * attn_out_2
 
         ## Step 11: Add residual connection
+        x = x + attn_out_2
 
 
-        return None
+        return x
 
 
 ## (FOR FLOW MATCHING EC ONLY) Given for free!
