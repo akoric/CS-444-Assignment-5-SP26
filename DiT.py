@@ -333,25 +333,72 @@ class DiT(nn.Module):
         ## TODO: Implement DiT
         ## Modules needed: Patchify, Linear, Embedding, Positional Embedding (use provided get_position_embedding), num_blocks x DiTBlock, LayerNorm, Linear, Unpatchify
         ## You must zero initialize the final linear layer
+        patch_dim = patch_size * patch_size * num_channels
 
+        # Patchify and Unpatchify
+        self.num_patches = num_patches
+        self.patchify = Patchify(patch_size)
+        self.unpatchify = Unpatchify(patch_size)
+
+        # proj patch_dim to hidden_dim
+        self.proj_x = nn.Linear(patch_dim, hidden_dim)
+
+        # pos encoding
+        self.pos_emb = self.get_position_embedding(num_patches, patch_size, hidden_dim)
+
+        # time embedding
+        self.time_emb = nn.Embedding(num_timesteps, time_emb_dim)
+
+        # DiT blocks 
+        self.blocks = nn.ModuleList([
+            DiTBlock(hidden_dim, num_heads, ff_dim, time_emb_dim)
+            for _ in range(num_blocks)
+        ])
+
+        # LayerNorm -> Linear Proj -> Un Patchify
+        # normalize over hidden_dim of x: (B, T, hidden_dim)
+        self.norm = nn.LayerNorm(hidden_dim)
+
+        # proj from hidden_dim to patch_dim for unpatchify
+        # also final linear layer should be zero-init
+        self.final_proj = nn.Linear(hidden_dim, patch_dim)
+        nn.init.zeros_(self.final_proj.weight)
+        nn.init.zeros_(self.final_proj.bias)
 
     def forward(self, image, timestep):
         ## TODO: Implement DiT
+        # image: (batch_size, num_channels, height, width)
+        # timestep: (batch_size,)
 
         ## Step 1: Patchify the image
+        image = self.patchify(image) # (B, num_patches, patch_dim)
 
         ## Step 2: Project the patches to the hidden dimension
+        image = self.proj_x(image) # (B, num_patches, hidden_dim)
 
         ## Step 3: Add the positional encoding
+        # pos_emb is (1, num_patches, hidden_dim)
+        image = image + self.pos_emb # (B, num_patches, hidden_dim)
 
         ## Step 4: Create the time embedding
+        # (B,) → (B, time_emb_dim)
+        # bc nn.Embedding is essentially a lookup table 
+        t_emb = self.time_emb(timestep)
 
         ## Step 5: Apply the DiT blocks
+        # t_emb is passed to every block (need to know current time step)
+        # image reassigned bc each block's output becomes the next block's input
+        # block is calling DiTBlock.forward(x, t_emb)
+        for block in self.blocks:
+            image = block(image, t_emb) # (B, num_patches, hidden_dim)
 
         ## Step 6: Apply the layer normalization
+        image = self.norm(image) # (B, num_patches, hidden_dim)
 
         ## Step 7: Project the hidden dimension back to the patch dimension
+        image = self.final_proj(image) # (B, num_patches, patch_dim)
 
         ## Step 8: Unpatchify the image
+        image = self.unpatchify(image) # (batch_size, num_channels, height, width)
 
-        return None
+        return image
