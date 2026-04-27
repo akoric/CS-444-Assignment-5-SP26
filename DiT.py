@@ -106,10 +106,27 @@ class SelfAttention(nn.Module):
         super().__init__(*args, **kwargs)
         ## TODO: Implement SelfAttention
         ## Modules needed: 3x Linear
+        self.dk = inner_dim
+
+        # learnable parms 
+        self.W_q = nn.Linear(hidden_dim, inner_dim)
+        self.W_k = nn.Linear(hidden_dim, inner_dim)
+        self.W_v = nn.Linear(hidden_dim, inner_dim)
 
     def forward(self, x):
-        ## TODO: Implement SelfAttention
-        return None
+        # getting K, Q, V by proj x through the linear layers
+        Q = self.W_q(x) # e.g. x @ W_q.weight.T + W_q.bias
+        K = self.W_k(x)
+        V = self.W_v(x)
+
+        #compute scores = Q @ K.T / sqrt(d_k)
+        scores = torch.matmul(Q, K.transpose(-2, -1)) / (self.dk ** 0.5)
+
+        # apply softmax over last dim (normalizing each row indep)
+        weights = torch.softmax(scores, dim=-1)
+
+        # multiply by V
+        return torch.matmul(weights, V)
 
 
 '''
@@ -123,15 +140,36 @@ MultiHeadSelfAttn:
     - Refer to Attention is all you need Section 3.2.2
 '''
 
-class MultiHeadSelfAttn(nn.Module):
+class SelfAttention(nn.Module):
     def __init__(self, hidden_dim, num_heads, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         ## TODO: Implement MultiHeadSelfAttn, you must use the SelfAttention modules you implemented above
-        ## Modules needed: num_heads x SelfAttention, Linear 
+        ## Modules needed: num_heads x SelfAttention, Linear
+        self.inner_dim = hidden_dim // num_heads
+
+        # each head is its own SelfAttention
+        self.heads = nn.ModuleList([
+            SelfAttention(hidden_dim, self.inner_dim)
+            for _ in range(num_heads)
+        ])
+
+        # learnable pram that operates on the concatenated output of all parallel attention heads
+
+        # reason input & output dim are the same bc  the whole point of multi-head attention is to
+        # enrich each token's representation, not change its size 
+        self.out_proj = nn.Linear(hidden_dim, hidden_dim)
 
     def forward(self, x):
         ## TODO: Implement MultiHeadSelfAttn
-        return None
+        # run each head on the same x
+        head_outputs = [head(x) for head in self.heads] # (B, T, inner_dim) x num_heads
+
+        # concat along last dim
+        # e.g. (B, T, 64+64+64+64) = (B, T, 256) = (B, T, hidden_dim) 
+        # bc inner_dim x num_heads = hidden_dim
+        out = torch.cat(head_outputs, dim=-1)
+
+        return self.out_proj(out) # (B, T, hidden_dim)
 
 
 
