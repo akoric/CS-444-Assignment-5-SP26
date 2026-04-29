@@ -356,7 +356,7 @@ class DiT(nn.Module):
         ])
 
         # LayerNorm -> Linear Proj -> Un Patchify
-        # normalize over hidden_dim of x: (B, T, hidden_dim)
+        # normalize over hidden_dim of x: (B, num_patches, hidden_dim)
         self.norm = nn.LayerNorm(hidden_dim)
 
         # proj from hidden_dim to patch_dim for unpatchify
