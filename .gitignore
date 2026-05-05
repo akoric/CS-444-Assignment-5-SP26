@@ -1,1 +1,3 @@
 checkpoints/checkpoint.pt
+data/celeba
+data/MNIST

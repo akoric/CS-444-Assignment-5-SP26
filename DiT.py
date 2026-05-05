@@ -89,8 +89,6 @@ class FeedForward(nn.Module):
         ## TODO: Implement FeedForward
         return self.FFN(x)
 
-
-
 '''
 SelfAttention:
     - Input: (batch_size, num_patches, hidden_dim)
@@ -127,6 +125,7 @@ class SelfAttention(nn.Module):
 
         # multiply by V
         return torch.matmul(weights, V)
+
 
 
 '''
@@ -171,7 +170,87 @@ class MultiHeadSelfAttn(nn.Module):
 
         return self.out_proj(out) # (B, T, hidden_dim)
 
+"""
+Extra Credit: Implement RoPE instead of the fixed positional embeddings.
+"""
 
+# Precompute rotation frequencies
+def precompute_freqs(d_k, max_seq_len):
+    # frequencies for each dimension pair
+    freqs = 1.0 / (10000 ** (torch.arange(0, d_k, 2) / d_k))
+    # positions
+    positions = torch.arange(max_seq_len)
+    # outer product: (seq_len, d_k//2)
+    freqs = torch.outer(positions, freqs)
+    # convert to complex form
+    freqs_cis = torch.polar(torch.ones_like(freqs), freqs)
+    return freqs_cis
+
+# Apply rotation to Q and K
+def apply_rope(x, freqs_cis):
+    # x: (B, T, d_k)
+    # reshape to complex pairs
+    x_complex = torch.view_as_complex(x.reshape(*x.shape[:-1], -1, 2))
+    # apply rotation
+    x_rotated = x_complex * freqs_cis
+    # back to real
+    return torch.view_as_real(x_rotated).flatten(-2)
+
+# RoPE SelfAttention
+class SelfAttentionRoPE(nn.Module):
+    def __init__(self, hidden_dim, inner_dim, max_seq_len):
+        super().__init__()
+        self.d_k = inner_dim
+        self.W_q = nn.Linear(hidden_dim, inner_dim)
+        self.W_k = nn.Linear(hidden_dim, inner_dim)
+        self.W_v = nn.Linear(hidden_dim, inner_dim)
+        
+        # precompute frequencies
+        self.freqs_cis = precompute_freqs(inner_dim, max_seq_len)
+
+    def forward(self, x):
+        Q = self.W_q(x)   # (B, T, d_k)
+        K = self.W_k(x)   # (B, T, d_k)
+        V = self.W_v(x)   # (B, T, d_k)
+
+        # move freqs to same device as x
+        freqs = self.freqs_cis[:x.shape[1]].to(x.device)
+
+        # apply RoPE to Q and K only
+        Q = apply_rope(Q, freqs)
+        K = apply_rope(K, freqs)
+
+        # from before
+        scores = torch.matmul(Q, K.transpose(-2, -1)) / (self.d_k ** 0.5)
+        weights = torch.softmax(scores, dim=-1)
+        return torch.matmul(weights, V)
+
+# MultiHeadSelfAttnRoPE
+class MultiHeadSelfAttnRoPE(nn.Module):
+    def __init__(self, hidden_dim, num_heads, max_seq_len, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        ## TODO: Implement MultiHeadSelfAttn, you must use the SelfAttention modules you implemented above
+        ## Modules needed: num_heads x SelfAttention, Linear
+        self.inner_dim = hidden_dim // num_heads
+
+        self.heads = nn.ModuleList([
+            SelfAttentionRoPE(hidden_dim, self.inner_dim, max_seq_len)
+            for _ in range(num_heads)
+        ])
+
+        self.out_proj = nn.Linear(hidden_dim, hidden_dim)
+
+    def forward(self, x):
+        ## TODO: Implement MultiHeadSelfAttn
+        # run each head on the same x
+        head_outputs = [head(x) for head in self.heads] # (B, T, inner_dim) x num_heads
+
+        # concat along last dim
+        # e.g. (B, T, 64+64+64+64) = (B, T, 256) = (B, T, hidden_dim) 
+        # bc inner_dim x num_heads = hidden_dim
+        out = torch.cat(head_outputs, dim=-1)
+
+        return self.out_proj(out) # (B, T, hidden_dim)
 
 """
 DiTBlock:
@@ -185,7 +264,7 @@ DiTBlock:
 
 class DiTBlock(nn.Module):
 
-    def __init__(self, hidden_dim, num_heads, ff_dim, time_emb_dim, *args, **kwargs) -> None:
+    def __init__(self, hidden_dim, num_heads, ff_dim, time_emb_dim, num_patches=None, use_rope=False, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         ## TODO: Implement DiTBlock
         self.hidden_dim = hidden_dim
@@ -204,7 +283,11 @@ class DiTBlock(nn.Module):
             zero_init(nn.Linear(time_emb_dim // 4, hidden_dim * 6)) #output shape: (batch dimension, hidden dimension * 6)
         )
 
-        self.mhsa = MultiHeadSelfAttn(hidden_dim, num_heads)
+        # RoPE
+        if use_rope:
+            self.mhsa = MultiHeadSelfAttnRoPE(hidden_dim, num_heads, max_seq_len=num_patches)
+        else:
+            self.mhsa = MultiHeadSelfAttn(hidden_dim, num_heads)
 
         # normalize over the last dimension of size hidden_dim (each token independently)
         self.norm1 = nn.LayerNorm(self.hidden_dim, elementwise_affine=False)
@@ -328,7 +411,7 @@ class DiT(nn.Module):
         pos_emb = nn.Parameter(pos_emb, requires_grad=False)
         return pos_emb
 
-    def __init__(self, patch_size, num_blocks, num_heads, ff_dim, time_emb_dim, num_timesteps, hidden_dim, num_patches, num_channels=3, training_type="ddpm", *args, **kwargs) -> None:
+    def __init__(self, patch_size, num_blocks, num_heads, ff_dim, time_emb_dim, num_timesteps, hidden_dim, num_patches, num_channels=3, training_type="ddpm", use_rope=False, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         ## TODO: Implement DiT
         ## Modules needed: Patchify, Linear, Embedding, Positional Embedding (use provided get_position_embedding), num_blocks x DiTBlock, LayerNorm, Linear, Unpatchify
@@ -337,21 +420,25 @@ class DiT(nn.Module):
 
         # Patchify and Unpatchify
         self.num_patches = num_patches
+        self.use_rope = use_rope
         self.patchify = Patchify(patch_size)
         self.unpatchify = Unpatchify(patch_size)
 
         # proj patch_dim to hidden_dim
         self.proj_x = nn.Linear(patch_dim, hidden_dim)
 
-        # pos encoding
+        # pos encoding (not used when use_rope=True, but kept so old checkpoints load cleanly)
         self.pos_emb = self.get_position_embedding(num_patches, patch_size, hidden_dim)
+
+        # learned (pos encoding, above, commented out for learned positional embedding):
+        # self.pos_emb = nn.Parameter(torch.randn(1, num_patches, hidden_dim))
 
         # time embedding
         self.time_emb = nn.Embedding(num_timesteps, time_emb_dim)
 
-        # DiT blocks 
+        # DiT blocks, pass num_patches and use_rope so each block builds the right attention
         self.blocks = nn.ModuleList([
-            DiTBlock(hidden_dim, num_heads, ff_dim, time_emb_dim)
+            DiTBlock(hidden_dim, num_heads, ff_dim, time_emb_dim, num_patches=num_patches, use_rope=use_rope)
             for _ in range(num_blocks)
         ])
 
@@ -376,9 +463,9 @@ class DiT(nn.Module):
         ## Step 2: Project the patches to the hidden dimension
         image = self.proj_x(image) # (B, num_patches, hidden_dim)
 
-        ## Step 3: Add the positional encoding
-        # pos_emb is (1, num_patches, hidden_dim)
-        image = image + self.pos_emb # (B, num_patches, hidden_dim)
+        ## Step 3: Add the positional encoding (skipped when use_rope=True)
+        if not self.use_rope:
+            image = image + self.pos_emb # (B, num_patches, hidden_dim)
 
         ## Step 4: Create the time embedding
         # (B,) → (B, time_emb_dim)

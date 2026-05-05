@@ -1,0 +1,50 @@
+Job ID:    2236800
+Node:      gh019
+Started:   Sun May  3 01:51:45 PM CDT 2026
+GPU:
+GPU 0: NVIDIA GH200 120GB (UUID: GPU-0da510af-f562-1f2f-f290-a4719fad7cb5)
+Using device: cuda
+[FID] Pre-computing real features on up to 1000 samples...
+[FID] Real features ready (1024 samples).
+Found checkpoint at checkpoints/checkpoint_VAE.pt, resuming...
+Resumed from epoch 1
+Epoch 2 | Avg Loss: 0.317322
+Epoch 3 | Avg Loss: 0.309133
+Epoch 4 | Avg Loss: 0.304548
+Epoch 5 | Avg Loss: 0.300458
+Epoch 6 | Avg Loss: 0.298243
+Epoch 7 | Avg Loss: 0.297177
+Epoch 8 | Avg Loss: 0.294594
+Epoch 9 | Avg Loss: 0.294159
+Epoch 10 | Avg Loss: 0.292709
+Epoch 11 | Avg Loss: 0.291510
+Epoch 12 | Avg Loss: 0.291458
+Epoch 13 | Avg Loss: 0.290553
+Epoch 14 | Avg Loss: 0.289859
+Epoch 15 | Avg Loss: 0.289303
+[FID] Pre-computing real features on up to 1000 samples...
+[FID] Real features ready (1024 samples).
+Epoch 15 | FID: 91.6178
+Saved image grid to batch_outputs/samples_epoch_15.png
+Epoch 16 | Avg Loss: 0.288156
+Epoch 17 | Avg Loss: 0.287438
+Epoch 18 | Avg Loss: 0.286875
+Epoch 19 | Avg Loss: 0.286154
+Epoch 20 | Avg Loss: 0.287029
+Epoch 21 | Avg Loss: 0.285805
+Epoch 22 | Avg Loss: 0.285218
+Epoch 23 | Avg Loss: 0.286083
+Epoch 24 | Avg Loss: 0.285106
+Epoch 25 | Avg Loss: 0.285346
+Epoch 26 | Avg Loss: 0.284526
+Epoch 27 | Avg Loss: 0.284181
+Epoch 28 | Avg Loss: 0.283607
+Epoch 29 | Avg Loss: 0.283706
+Epoch 30 | Avg Loss: 0.283571
+[FID] Pre-computing real features on up to 1000 samples...
+[FID] Real features ready (1024 samples).
+Epoch 30 | FID: 82.5124
+Saved image grid to batch_outputs/samples_epoch_30.png
+Training complete.
+Plots saved to batch_outputs/
+Finished:  Sun May  3 03:44:26 PM CDT 2026
