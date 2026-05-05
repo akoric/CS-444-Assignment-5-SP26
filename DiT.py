@@ -434,7 +434,10 @@ class DiT(nn.Module):
         # self.pos_emb = nn.Parameter(torch.randn(1, num_patches, hidden_dim))
 
         # time embedding
-        self.time_emb = nn.Embedding(num_timesteps, time_emb_dim)
+        if training_type == "flow_matching":
+            self.time_emb = ContinuousTimestepEmbedder(time_emb_dim)
+        else:
+            self.time_emb = nn.Embedding(num_timesteps, time_emb_dim)
 
         # DiT blocks, pass num_patches and use_rope so each block builds the right attention
         self.blocks = nn.ModuleList([
